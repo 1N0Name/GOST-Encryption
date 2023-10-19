@@ -15,6 +15,7 @@ public:
         CBC, // Cipher Block Chaining
         CFB, // Cipher Feedback
         OFB, // Output Feedback
+        CTR, // Counter
     };
 
     using byte_t  = unsigned char;
@@ -38,7 +39,11 @@ public:
      */
     void setInitializationVector(const char* iv);
     void encrypt(Method method, std::istream& is, std::ostream& os);
+    void encryptFile(const std::string& input_filename,
+                     const std::string& output_filename = "");
     void decrypt(Method method, std::istream& is, std::ostream& os);
+    void decryptFile(const std::string& input_filename,
+                     const std::string& output_filename = "");
 
 private:
     /**
@@ -67,6 +72,10 @@ private:
      * @return Блок данных.
      */
     block_t read_block();
+
+    std::string generateOutputFilename(const std::string& input_filename,
+                                       const std::string& suffix,
+                                       const std::string& default_suffix) const;
 
     /**
      * Преобразует блок данных в число.
@@ -116,6 +125,14 @@ private:
      * @return Зашифрованный блок.
      */
     block_t block_cipher(const std::array<uint32_t, 8>& __key, const block_t& text_block);
+
+    /**
+     * Данная функция принимает структуру данных `block_t` и увеличивает его значение на
+     * единицу.
+     * @param block - число, которое необходимо инкрементировать.
+     * @return Новый экземпляр представляющий инкрементированное значение.
+     */
+    block_t incrementCounter(const block_t& block);
 
     // Private Fields
     std::istream* m_stream;

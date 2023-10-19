@@ -196,6 +196,17 @@ std::string GOST_28147_89::processStream(Method method,
         return block ^ prev;
     };
 
+    // CTR (Counter) Mode:
+    // В этом режиме каждый блок данных XOR-ится с зашифрованным значением счетчика.
+    // Счетчик обычно начинается с определенного значения и инкрементируется на единицу
+    // с каждым новым блоком данных.
+    auto handleCTR = [&]()
+    {
+        block_t counter_encrypted = block_cipher(m_key, prev);
+        prev                      = incrementCounter(prev);
+        return block ^ counter_encrypted;
+    };
+
 #ifdef PR_DEBUG
     (isEncrypt) ? std::cout << "\n\t\t[ ENCRYPTED ]\n"
                             << std::endl
@@ -203,8 +214,8 @@ std::string GOST_28147_89::processStream(Method method,
                             << std::endl;
     std::cout << std::setfill('=') << std::setw(50) << "\n";
 #endif
-    // Последовательно разбиваем входной поток на блоки данных по 8 байт и обрабатываем
-    // их, пока он не закончится.
+    // Последовательно разбиваем входной поток на блоки данных по 8 байт и
+    // обрабатываем их, пока он не закончится.
     while (!m_stream->eof()) {
         block = read_block();
         switch (method) {
@@ -212,6 +223,7 @@ std::string GOST_28147_89::processStream(Method method,
             case Method::CBC: block = handleCBC(); break;
             case Method::CFB: block = handleCFB(); break;
             case Method::OFB: block = handleOFB(); break;
+            case Method::CTR: block = handleCTR(); break;
             default: break;
         }
         result += blockToString(block);
@@ -222,16 +234,50 @@ std::string GOST_28147_89::processStream(Method method,
     return result;
 }
 
+std::string GOST_28147_89::generateOutputFilename(const std::string& input_filename,
+                                                  const std::string& suffix,
+                                                  const std::string& default_suffix) const
+{
+    if (!suffix.empty())
+        return suffix;
+
+    std::string base = input_filename.substr(0, input_filename.find_last_of('.'));
+    std::string ext  = input_filename.substr(input_filename.find_last_of('.'));
+    return base + default_suffix + ext;
+}
+
 void GOST_28147_89::encrypt(Method method, std::istream& is, std::ostream& os)
 {
     m_stream = &is;
     os << processStream(method, m_key, true);
 }
 
+void GOST_28147_89::encryptFile(const std::string& input_filename,
+                                const std::string& output_filename)
+{
+    std::string out_filename =
+        generateOutputFilename(input_filename, output_filename, "_encrypted");
+    std::ifstream infile(input_filename, std::ios::binary);
+    std::ofstream outfile(out_filename, std::ios::binary);
+    encrypt(Method::CTR, infile, outfile);
+}
+
 void GOST_28147_89::decrypt(Method method, std::istream& is, std::ostream& os)
 {
     m_stream = &is;
     os << processStream(method, m_key, false);
+}
+
+void GOST_28147_89::decryptFile(const std::string& input_filename,
+                                const std::string& output_filename)
+{
+    std::string out_filename =
+        generateOutputFilename(input_filename, output_filename, "_plaintext");
+    out_filename.replace(out_filename.rfind("_encrypted"), 10, "");
+
+    std::ifstream infile(input_filename, std::ios::binary);
+    std::ofstream outfile(out_filename, std::ios::binary);
+    decrypt(Method::CTR, infile, outfile);
 }
 
 GOST_28147_89::block_t GOST_28147_89::read_block()
@@ -251,6 +297,29 @@ GOST_28147_89::block_t GOST_28147_89::read_block()
 #endif
 
     return block;
+}
+
+/**
+ * Пример:
+ * Входной блок {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF} :
+ * - Последний байт (0xFF) увеличивается и становится 0x00 из-за переполнения.
+ * - Перенос передается на предыдущий байт (также 0xFF), который увеличивается и также
+ * становится 0x00.
+ * - Так как был перенос из наименее значимого байта, следующий байт слева (в нашем
+ * случае, шестой) увеличивается на единицу и становится 0x01.
+ * - Остальные байты слева остаются без изменений.
+ * В итоге, наш блок преобразуется в {0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00}.
+ */
+GOST_28147_89::block_t GOST_28147_89::incrementCounter(const block_t& block)
+{
+    block_t incremented_block = block;
+    for (auto it = incremented_block.rbegin(); it != incremented_block.rend(); ++it) {
+        if (++(*it) != 0) // Если текущий байт не переполнился после инкремента
+            return incremented_block;
+    }
+
+    // Если цикл завершился, это означает переполнение для всего блока
+    throw std::runtime_error("Counter overflow detected");
 }
 
 //
@@ -288,9 +357,8 @@ std::array<GOST_28147_89::byte_t, S> GOST_28147_89::bitsToBlock(const T& bits)
  *    0xFull = 1111 (в двоичном виде)
  *    position * 4 = 12 (сдвигаем на 12 битов влево)
  *    Маска становится: 0xF000
- * 2. Применяем операцию И (bitwise AND) между num и маской. Это обнуляет все биты в num,
- * кроме интересующего нас 4-битного блока.
- *    num & 0xF000 = 0xB0000
+ * 2. Применяем операцию И (bitwise AND) между num и маской. Это обнуляет все биты в
+ * num, кроме интересующего нас 4-битного блока. num & 0xF000 = 0xB0000
  * 3. Сдвигаем результат на (position * 4) позиций вправо, чтобы получить итоговое
  * 4-битное значение. 0xB0000 >> 12 = 0xB Функция вернёт значение 0xB для указанного
  * примера.

@@ -28,7 +28,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="to_encrypt.txt">
+    <Text Include="test.txt">
       <Filter>Файлы ресурсов</Filter>
     </Text>
   </ItemGroup>

@@ -22,6 +22,9 @@ int main()
 
     std::cout << "All tests passed!" << std::endl;
 
+    gost.encryptFile("test.txt");
+    gost.decryptFile("test_encrypted.txt");
+
     return 0;
 }
 
