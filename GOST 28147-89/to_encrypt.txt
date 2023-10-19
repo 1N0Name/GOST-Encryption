@@ -1,0 +1,4 @@
+    size_t bytesRead = m_stream->gcount(); // Получаем реальное количество прочитанных байтов
+
+    if (bytesRead < 8)
+        block[bytesRead] = 0x80;
